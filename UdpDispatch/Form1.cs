@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Newtonsoft.Json;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -17,145 +18,100 @@ namespace UdpDispatch
     public partial class Form1 : Form
     {
         private ConcurrentQueue<byte[]> dataQueue;
-        private BackgroundWorker backgroundWorkerReceiveData;
-        private BackgroundWorker backgroundWorkerProcessData;
         private List<Config> ipList;
-        private UdpClient udpClient;
-        private UdpClient udpSendWave;
+        private List<Dispatcher> dispatchers;
         public Form1()
         {
             InitializeComponent();
             ipList = new List<Config>();
             dataQueue = new ConcurrentQueue<byte[]>();
+            dispatchers = new List<Dispatcher>();
             StreamReader sr = new StreamReader("config.csv", Encoding.UTF8);
             String line;
 
             char[] chs = { ',' };
             while ((line = sr.ReadLine()) != null)
             {
-                string[] items = line.Split(chs);
-                Config config = new Config(items[0], int.Parse(items[1]));
+                Config config = JsonConvert.DeserializeObject<Config>(line);
+                Dispatcher dispatcher = new Dispatcher(config.source_ip, config.source_port, config.frame_length, config.destination);
+                dispatchers.Add(dispatcher);
                 ipList.Add(config);
-                listBox1.Items.Add(line);
+                listBoxDestination.Items.Clear();
+                listBoxSource.Items.Add(config.source_ip+":"+config.source_port);
+                foreach(var item in config.destination)
+                {
+                    listBoxDestination.Items.Add(item.dest_ip + ":" + item.dest_port);
+                }
+
             }
             sr.Close();
 
-            backgroundWorkerProcessData = new BackgroundWorker();
-            backgroundWorkerReceiveData = new BackgroundWorker();
-            backgroundWorkerProcessData.WorkerSupportsCancellation = true;
-            backgroundWorkerProcessData.DoWork += BackgroundWorkerProcessData_DoWork;
-            backgroundWorkerReceiveData.WorkerSupportsCancellation = true;
-            backgroundWorkerReceiveData.DoWork += BackgroundWorkerReceiveData_DoWork;
+            startToolStripMenuItem.Enabled = true;
+            stopToolStripMenuItem.Enabled = false;
         }
 
-        private void BackgroundWorkerReceiveData_DoWork(object sender, DoWorkEventArgs e)
+        private void startToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            BackgroundWorker bgWorker = sender as BackgroundWorker;
-
-            this.udpClient = new UdpClient(29);
-            //IPEndPoint object will allow us to read datagrams sent from any source.
-            IPEndPoint RemoteIpEndPoint = new IPEndPoint(IPAddress.Any, 0);
-            while (true)
+            foreach (var dispatcher in dispatchers)
             {
-                try
-                {
-                    // Blocks until a message returns on this socket from a remote host.
-                    Byte[] receiveBytes = udpClient.Receive( ref RemoteIpEndPoint);
+                dispatcher.Start();
+            }
+            startToolStripMenuItem.Enabled = false;
+            stopToolStripMenuItem.Enabled = true;
+        }
 
-                    dataQueue.Enqueue(receiveBytes);
+        private void stopToolStripMenuItem_Click_1(object sender, EventArgs e)
+        {
+            foreach (var dispatcher in dispatchers)
+            {
+                dispatcher.Stop();
+            }
+            startToolStripMenuItem.Enabled = true;
+            stopToolStripMenuItem.Enabled = false;
+        }
 
-                    if (bgWorker.CancellationPending == true)
-                    {
-                        e.Cancel = true;
-                        break;
-                    }
-                }
-                catch (Exception ex)
+        private void listBoxSource_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            // Get the currently selected item in the ListBox.
+            string curItem = listBoxSource.SelectedItem.ToString();
+
+            listBoxDestination.Items.Clear();
+            foreach(var item in ipList)
+            {
+                if((item.source_ip+":"+item.source_port) == curItem)
                 {
-                    if (bgWorker.CancellationPending == true)
+                    foreach(var i in item.destination)
                     {
-                        e.Cancel = true;
-                        break;
+                        listBoxDestination.Items.Add(i.dest_ip + ":" + i.dest_port);
                     }
-                }
-                if (bgWorker.CancellationPending == true)
-                {
-                    e.Cancel = true;
                     break;
                 }
             }
         }
+    }
 
-        private void BackgroundWorkerProcessData_DoWork(object sender, DoWorkEventArgs e)
+    public class DestConfig
+    {
+        public string dest_ip;
+        public int dest_port;
+        public DestConfig(string _ip, int _port)
         {
-            BackgroundWorker bgWorker = sender as BackgroundWorker;
-            List <UdpClient> clients= new List<UdpClient>();
-            List<IPEndPoint>  remoteIpEndPoints = new List<IPEndPoint>();
-            UdpClient client = new UdpClient();
-            foreach (var config in ipList)
-            {
-                IPEndPoint endPoint = new IPEndPoint(IPAddress.Parse(config.ip), config.port);
-                remoteIpEndPoints.Add(endPoint);
-            }
-
-            while (true)
-            {
-                try
-                {
-                    int dataCount = dataQueue.Count;
-                    byte[] line = new byte[8];
-
-                    if (dataCount > 0)
-                    {
-                        bool success = dataQueue.TryDequeue(out line);
-                        foreach(var endpoint in remoteIpEndPoints)
-                        {
-                            client.Send(line, line.Length, endpoint);
-                        }
-                        continue;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    
-                }
-
-
-
-                if (bgWorker.CancellationPending == true)
-                {
-                    client.Close();
-                    e.Cancel = true;
-                    break;
-                }
-
-                Thread.Sleep(10);
-            }
+            this.dest_ip = _ip;
+            this.dest_port = _port;
         }
+    }
+    public class Config
+    {
+        public string source_ip;
+        public int source_port;
+        public int frame_length;
+        public List<DestConfig> destination;
 
-        class Config
+        public Config(string _ip, int _port)
         {
-            public string ip;
-            public int port;
-
-            public Config(string _ip,int _port)
-            {
-                this.ip = _ip;
-                this.port = _port;
-            }
-        }
-
-        private void buttonStart_Click(object sender, EventArgs e)
-        {
-            backgroundWorkerProcessData.RunWorkerAsync();
-            backgroundWorkerReceiveData.RunWorkerAsync();
-        }
-
-        private void buttonStop_Click(object sender, EventArgs e)
-        {
-            backgroundWorkerProcessData.CancelAsync();
-            backgroundWorkerReceiveData.CancelAsync();
-            udpClient.Close();
+            this.source_ip = _ip;
+            this.source_port = _port;
+            this.destination = new List<DestConfig>();
         }
     }
 }
