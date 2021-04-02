@@ -87,6 +87,10 @@ namespace UdpDispatch
                 }
                 catch (Exception ex)
                 {
+                    StreamWriter sw = new StreamWriter(source_ip + ".txt");
+                    sw.WriteLine(ex.StackTrace);
+                    sw.Close();
+
                     if (bgWorker.CancellationPending == true)
                     {
                         e.Cancel = true;

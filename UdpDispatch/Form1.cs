@@ -28,8 +28,7 @@ namespace UdpDispatch
             dispatchers = new List<Dispatcher>();
             StreamReader sr = new StreamReader("config.csv", Encoding.UTF8);
             String line;
-
-            char[] chs = { ',' };
+            
             while ((line = sr.ReadLine()) != null)
             {
                 Config config = JsonConvert.DeserializeObject<Config>(line);
